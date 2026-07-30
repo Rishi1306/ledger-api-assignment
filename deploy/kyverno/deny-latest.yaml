@@ -1,0 +1,26 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: deny-latest-tag
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: check-image-tag
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: ["payments"]
+      validate:
+        message: "Image must use a specific tag, not :latest. Example: image:v1.0.0"
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.image }}"
+                    operator: Equals
+                    value: "*:latest"
+                  - key: "{{ element.image }}"
+                    operator: NotEquals
+                    value: "*:*"

@@ -15,14 +15,64 @@ spec:
       labels:
         app: ledger-api
     spec:
+      serviceAccountName: ledger-api
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: ledger-api
-          image: ledger-api:starter
-          imagePullPolicy: IfNotPresent
-          env:
-            - name: STRIPE_API_KEY
-              value: "sk_live_9f3a2b7c1e4d8REDACTED"
-            - name: DB_PASSWORD
-              value: "P@ssw0rd123"
+          image: localhost:5001/ledger-api:v1.0.0
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]
+          envFrom:
+            - configMapRef:
+                name: ledger-api-config
+          env:
+            - name: STRIPE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ledger-api-secrets
+                  key: STRIPE_API_KEY
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ledger-api-secrets
+                  key: DB_PASSWORD
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,216 @@
+name: Secure CI/CD Pipeline
+
+on:
+  push:
+    branches: ["main", "task*"]
+  pull_request:
+    branches: ["main"]
+
+# Minimal permissions — each job adds only what it needs
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/ledger-api
+
+jobs:
+
+  # ── Gate 1: Secrets Scan ─────────────────────────────────────────────────
+  # Scans git history for hardcoded credentials, API keys, passwords.
+  # FAIL POLICY: Hard block — any secret found stops the pipeline immediately.
+  secrets-scan:
+    name: "Gate 1 · Secrets Scan (gitleaks)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # scan full git history, not just latest commit
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Gate 2: SAST ─────────────────────────────────────────────────────────
+  # Static code analysis — finds security bugs in the source code before running.
+  # FAIL POLICY: Hard block on HIGH/CRITICAL findings.
+  sast:
+    name: "Gate 2 · SAST (Semgrep)"
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: semgrep/semgrep-action@v1
+        with:
+          config: "p/python p/owasp-top-ten p/flask"
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+      - name: Upload SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+        continue-on-error: true
+
+  # ── Gate 3: Dependency CVE Scan ──────────────────────────────────────────
+  # Scans requirements.txt for known vulnerabilities.
+  # FAIL POLICY: Hard block on CRITICAL CVEs that have a fix available.
+  #              CVEs with no fix yet are logged but don't block the build.
+  dependency-scan:
+    name: "Gate 3 · Dependency Scan (Trivy)"
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Upload SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+        continue-on-error: true
+
+  # ── Build & Push ─────────────────────────────────────────────────────────
+  # Only runs if all 3 gates above pass.
+  # Pushes image to GitHub Container Registry (GHCR) — free with GitHub account.
+  build:
+    name: "Build & Push to GHCR"
+    runs-on: ubuntu-latest
+    needs: [secrets-scan, sast, dependency-scan]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-ref: ${{ steps.image-ref.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=ref,event=branch
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./app
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - id: image-ref
+        run: echo "ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+  # ── Gate 4: Image CVE Scan ───────────────────────────────────────────────
+  # Scans the final built image for OS and library vulnerabilities.
+  # Same fail policy as dependency-scan.
+  image-scan:
+    name: "Gate 4 · Image Scan (Trivy)"
+    runs-on: ubuntu-latest
+    needs: [build]
+    permissions:
+      security-events: write
+      packages: read
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: image
+          image-ref: ${{ needs.build.outputs.image-ref }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Upload SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+        continue-on-error: true
+
+  # ── Sign Image + SLSA Provenance ─────────────────────────────────────────
+  # Cosign keyless signing: uses GitHub's OIDC token to prove this signature
+  # came from THIS workflow in THIS repo. No private key to manage.
+  # SLSA provenance: records what built the image, from which commit.
+  sign:
+    name: "Sign Image + SLSA (Cosign)"
+    runs-on: ubuntu-latest
+    needs: [build, image-scan]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: sigstore/cosign-installer@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Sign the image
+        run: |
+          cosign sign --yes "${{ needs.build.outputs.image-ref }}"
+      - name: Verify signature (proof it worked)
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${{ needs.build.outputs.image-ref }}"
+      - name: Generate SLSA provenance attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ needs.build.outputs.image-digest }}
+          push-to-registry: true
+
+  # ── GitOps: Update deployment manifest ───────────────────────────────────
+  # Updates deployment.yaml with the new image digest and commits it back.
+  # ArgoCD watches this file and auto-deploys when it changes.
+  deploy:
+    name: "Update Deployment (GitOps)"
+    runs-on: ubuntu-latest
+    needs: [sign]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update image in deployment.yaml
+        run: |
+          NEW_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.image-digest }}"
+          sed -i "s|image: .*ledger-api.*|image: ${NEW_IMAGE}|g" deploy/deployment.yaml
+      - name: Commit updated manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deploy/deployment.yaml
+          git diff --staged --quiet || git commit -m "ci: update image to ${{ github.sha }}"
+          git push
