@@ -1,0 +1,92 @@
+# Default-deny all traffic in the payments namespace.
+# Then explicitly allow only what's needed.
+# NOTE: Requires a CNI that enforces NetworkPolicy (Calico/Cilium).
+# kind uses kindnet which does NOT enforce — use for manifest correctness only.
+
+# Block all inbound traffic by default
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: payments
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Block all outbound traffic by default
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: payments
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+---
+# Allow all pods to do DNS lookups (port 53)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: payments
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# Allow inbound traffic to ledger-api from reporting and the ingress controller
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ledger-api-ingress
+  namespace: payments
+spec:
+  podSelector:
+    matchLabels:
+      app: ledger-api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - port: 8080
+    - from:
+        - podSelector:
+            matchLabels:
+              app: reporting
+      ports:
+        - port: 8080
+---
+# Allow reporting pod to call ledger-api
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-reporting-to-ledger
+  namespace: payments
+spec:
+  podSelector:
+    matchLabels:
+      app: reporting
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: ledger-api
+      ports:
+        - port: 8080

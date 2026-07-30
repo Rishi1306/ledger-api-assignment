@@ -3,6 +3,7 @@ kind: ServiceAccount
 metadata:
   name: reporting
   namespace: payments
+automountServiceAccountToken: false
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -22,7 +23,56 @@ spec:
         app: reporting
     spec:
       serviceAccountName: reporting
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: client
-          image: curlimages/curl:8.8.0
+          image: localhost:5001/curlimages/curl:8.8.0
           command: ["sleep", "infinity"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "ps aux | grep sleep"]
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "ps aux | grep sleep"]
+            initialDelaySeconds: 3
+            periodSeconds: 15
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reporting
+  namespace: payments
+spec:
+  selector:
+    app: reporting
+  ports:
+    - port: 8080
+      targetPort: 8080
