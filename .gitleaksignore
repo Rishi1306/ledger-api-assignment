@@ -1,0 +1,10 @@
+# Gitleaks fingerprint allowlist — known false positives
+#
+# 1. Historical plaintext secret from original repo author (bhabani-dodo).
+#    Our branch replaces this with SealedSecrets — cannot rewrite upstream history.
+2e1cd43fab5b9769d3bf506184db83627acae672:deploy/deployment.yaml:stripe-access-token:24
+#
+# 2 & 3. SealedSecret encrypted ciphertext — these are kubeseal-encrypted blobs,
+#    NOT real secrets. High entropy triggers the generic-api-key rule incorrectly.
+acd163603f2793cb75185ec8545c456bb94c3126:deploy/sealed-secret.yaml:generic-api-key:9
+acd163603f2793cb75185ec8545c456bb94c3126:deploy/sealed-secret.yaml:generic-api-key:10
