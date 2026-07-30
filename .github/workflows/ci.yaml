@@ -12,9 +12,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  # github.repository_owner can contain uppercase letters which GHCR rejects.
-  # We lowercase it in each job using a 'prepare' step instead.
-  IMAGE_NAME: ${{ github.repository_owner }}/ledger-api
+  IMAGE_NAME: rishi1306/ledger-api
 
 jobs:
 
@@ -97,9 +95,6 @@ jobs:
       image-ref: ${{ steps.image-ref.outputs.ref }}
     steps:
       - uses: actions/checkout@v4
-      - name: Lowercase image name
-        id: image
-        run: echo "name=$(echo '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -111,7 +106,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ steps.image.outputs.name }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=sha,prefix=sha-,format=short
             type=ref,event=branch
@@ -124,7 +119,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
       - id: image-ref
-        run: echo "ref=${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+        run: echo "ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
 
   # ── Gate 4: Image CVE Scan ───────────────────────────────────────────────
   # Scans the final built image for OS and library vulnerabilities.
@@ -191,7 +186,7 @@ jobs:
       - name: Generate SLSA provenance attestation
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name: ${{ needs.build.outputs.image-ref }}
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ needs.build.outputs.image-digest }}
           push-to-registry: true
 
@@ -210,7 +205,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Update image in deployment.yaml
         run: |
-          NEW_IMAGE="${{ needs.build.outputs.image-ref }}"
+          NEW_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.image-digest }}"
           sed -i "s|image: .*ledger-api.*|image: ${NEW_IMAGE}|g" deploy/deployment.yaml
       - name: Commit updated manifest
         run: |
