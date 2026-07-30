@@ -1,0 +1,18 @@
+# Gitleaks configuration — allowlist known false positives
+# See: https://github.com/gitleaks/gitleaks#configuration
+
+title = "Gitleaks Config"
+
+[extend]
+# Use the default ruleset
+useDefault = true
+
+[[allowlists]]
+description = "SealedSecret encrypted values — these are kubeseal ciphertext, not real secrets"
+commits = ["acd163603f2793cb75185ec8545c456bb94c3126"]
+paths = ["deploy/sealed-secret.yaml"]
+
+[[allowlists]]
+description = "Historical plaintext secret in original repo — replaced by SealedSecrets in our hardened branch"
+commits = ["2e1cd43fab5b9769d3bf506184db83627acae672"]
+paths = ["deploy/deployment.yaml"]
