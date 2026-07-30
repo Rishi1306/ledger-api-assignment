@@ -24,6 +24,7 @@ jobs:
 
       - name: Build and push
         run: |
-          IMAGE=ghcr.io/${{ github.repository_owner }}/ledger-api:latest
+          # Hardcoded lowercase — GHCR requires all-lowercase repository names
+          IMAGE=ghcr.io/rishi1306/ledger-api:sha-$(git rev-parse --short HEAD)
           docker build -t "$IMAGE" ./app
           docker push "$IMAGE"

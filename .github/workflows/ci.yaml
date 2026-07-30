@@ -5,6 +5,7 @@ on:
     branches: ["main", "task*"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch: {}
 
 # Minimal permissions — each job adds only what it needs
 permissions:
@@ -12,7 +13,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/ledger-api
+  IMAGE_NAME: rishi1306/ledger-api
 
 jobs:
 
