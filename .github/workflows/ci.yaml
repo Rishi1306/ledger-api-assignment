@@ -5,6 +5,7 @@ on:
     branches: ["main", "task*"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch: {}
 
 # Minimal permissions — each job adds only what it needs
 permissions:
