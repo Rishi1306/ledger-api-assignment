@@ -459,29 +459,6 @@ The original repo had a `build.yml` that also triggered on push to `main`. This 
 
 ---
 
-## Screenshots to Capture
-
-Since these are live GitHub Actions runs, please take the following screenshots for your submission:
-
-### Task 1
-1. **Kind cluster running** — `kubectl get nodes` showing `ledger-local` Ready
-2. **Pods running** — `kubectl get pods -n payments` showing all pods Running
-3. **Security context verified** — `kubectl exec` output showing `uid=1000`, `CapEff: 0000000000000000`, read-only FS test
-4. **Kyverno blocking root** — output of `kubectl run bad-root --image=nginx:alpine -n payments` being rejected
-5. **Kyverno blocking latest** — output of `kubectl run bad-latest --image=nginx:latest -n payments` being rejected
-6. **SealedSecret decrypted** — `kubectl get secret ledger-api-secrets -n payments` showing the secret exists
-
-### Task 2
-7. **GitHub Actions — full green pipeline** — `https://github.com/Rishi1306/ledger-api-assignment/actions` showing all 7 jobs green
-8. **Gate 1 (Gitleaks) green** — job log showing `0 leaks found`
-9. **Gate 2 (Semgrep) green** — job log showing scan completed
-10. **Build job** — log showing image pushed to GHCR with sha digest
-11. **Sign job** — cosign verify output confirming valid signature
-12. **SLSA attestation** — GHCR package page showing attestation attached
-13. **Deploy job** — git commit `ci: update image to <sha>` in the repo
-
----
-
 ## Commit History
 
 ```
